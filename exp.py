@@ -20,14 +20,14 @@ def simulate(method: str, delta: float, base_rng: np.random.Generator) -> None:
 
     match method:
         case "randomized":
-            results = Parallel(n_jobs=48)(
+            results = Parallel(n_jobs=96)(
                 delayed(randomized_inference)(
                     rng, n=n, d=d, delta=delta, sigma=sigma, k=k, tau=tau
                 )
                 for rng in base_rng.spawn(10000)
             )
         case "polyhedral":
-            results = Parallel(n_jobs=48)(
+            results = Parallel(n_jobs=96)(
                 delayed(polyhedral_inference)(
                     rng, n=n, d=d, delta=delta, sigma=sigma, k=k
                 )

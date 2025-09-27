@@ -15,4 +15,4 @@ export VECLIB_MAXIMUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
 cd $PBS_O_WORKDIR
-uv run experiment/$MYFILE $MYARGS
+uv run $MYFILE $MYARGS

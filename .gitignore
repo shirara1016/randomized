@@ -9,3 +9,5 @@ wheels/
 # Virtual environments
 .venv
 .mypy_cache/
+
+path_for_logs
