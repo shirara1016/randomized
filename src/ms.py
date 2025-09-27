@@ -58,7 +58,7 @@ class MarginalScreeningNorm:
         **kwargs,
     ) -> SelectiveInferenceResult:
         self.eta = self.construct_eta(index)
-        self.si = SelectiveInferenceNorm(self.y, self.sigma, self.eta)
+        self.si = SelectiveInferenceNorm(self.y, self.sigma**2, self.eta)
         return self.si.inference(
             self.algorithm,
             self.model_selector,
