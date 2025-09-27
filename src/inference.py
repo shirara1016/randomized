@@ -94,11 +94,11 @@ def compute_randomized_cdf(
             - log_denominator
         )
 
-    pivot = 0.0
+    value = 0.0
     for interval in truncated_region:
         a, b = interval
-        pivot += quad(integrand, a, b)[0]
-    return pivot
+        value += quad(integrand, a, b)[0]
+    return value
 
 
 def compute_randomized_pdf(
@@ -123,11 +123,11 @@ def compute_randomized_pdf(
             - log_denominator
         )
 
-    pivot = 0.0
+    value = 0.0
     for interval in truncated_region:
         a, b = interval
-        pivot += quad(integrand, a, b)[0]
-    return pivot
+        value += quad(integrand, a, b)[0]
+    return value
 
 
 def polyhedral_inference(
