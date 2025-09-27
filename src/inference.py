@@ -200,3 +200,33 @@ def polyhedral_inference(
         x0=0.0,
     ).x[0]
     return true_signal, p_value, [ci_lower, ci_upper], is_contain, mle
+
+
+def naive_inference(
+    rng: np.random.Generator,
+    n: int = 100,
+    d: int = 10,
+    delta: float = 0.0,
+    sigma: float = 1.0,
+    k: int = 3,
+):
+    beta = delta * np.ones(d)
+    X = rng.normal(size=(n, d))
+    y = X @ beta + rng.normal(size=n, scale=sigma)
+
+    ms = MarginalScreeningNorm(X, y, sigma, k)
+    result: SelectiveInferenceResult = ms.inference(
+        rng.integers(k), inference_mode="over_conditioning"
+    )
+
+    p_value = result.naive_p_value()
+    stat = result.stat * sigma * np.linalg.norm(ms.eta, ord=2)
+
+    true_signal = ms.eta @ (X @ beta)
+    ci_lower = stat - norm.ppf(0.975) * sigma * np.linalg.norm(ms.eta, ord=2)
+    ci_upper = stat + norm.ppf(0.975) * sigma * np.linalg.norm(ms.eta, ord=2)
+    is_contain = (ci_lower <= true_signal) and (true_signal <= ci_upper)
+
+    mle = stat
+
+    return true_signal, p_value, [ci_lower, ci_upper], is_contain, mle

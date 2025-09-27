@@ -7,7 +7,7 @@ import numpy as np
 import polars as pl
 from joblib import Parallel, delayed
 
-from src.inference import polyhedral_inference, randomized_inference
+from src.inference import naive_inference, polyhedral_inference, randomized_inference
 
 warnings.filterwarnings("ignore")
 
@@ -31,6 +31,11 @@ def simulate(method: str, delta: float, base_rng: np.random.Generator) -> None:
                 delayed(polyhedral_inference)(
                     rng, n=n, d=d, delta=delta, sigma=sigma, k=k
                 )
+                for rng in base_rng.spawn(10000)
+            )
+        case "naive":
+            results = Parallel(n_jobs=96)(
+                delayed(naive_inference)(rng, n=n, d=d, delta=delta, sigma=sigma, k=k)
                 for rng in base_rng.spawn(10000)
             )
     true_signal_list, p_list, ci_list, is_contain_list, mle_list = zip(*results)
@@ -65,6 +70,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    seed = int(args.delta * 1000) + (1 if args.method == "randomized" else 0)
+    sub_seed = (1 if args.method == "randomized" else 0) + (
+        2 if args.method == "naive" else 0
+    )
+    seed = int(args.delta * 1000) + sub_seed
     base_rng = np.random.default_rng(seed)
     simulate(args.method, args.delta, base_rng)
