@@ -1,9 +1,9 @@
 """Module for utility functions for conducting selective inference."""
 
 import numpy as np
-from scipy.special import logsumexp
-from scipy.stats import rv_continuous
-from sicore import RealSubset
+from scipy.special import logsumexp  # type: ignore[import]
+from scipy.stats import rv_continuous  # type: ignore[import]
+from sicore import RealSubset  # type: ignore[import]
 
 
 def compute_log_area(rv: rv_continuous, intervals: RealSubset) -> float:

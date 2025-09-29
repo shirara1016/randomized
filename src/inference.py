@@ -1,10 +1,14 @@
 """Module for selective inference."""
 
 import numpy as np
-from scipy.integrate import quad
-from scipy.optimize import brentq, minimize
-from scipy.stats import norm
-from sicore import RealSubset, SelectiveInferenceResult, truncated_cdf
+from scipy.integrate import quad  # type: ignore[import]
+from scipy.optimize import brentq, minimize  # type: ignore[import]
+from scipy.stats import norm  # type: ignore[import]
+from sicore import (  # type: ignore[import]
+    RealSubset,
+    SelectiveInferenceResult,
+    truncated_cdf,
+)
 
 from src.ms import MarginalScreeningNorm
 from src.utils import compute_log_area
@@ -26,12 +30,13 @@ def randomized_inference(
 
     ms = MarginalScreeningNorm(X, y + omega, np.sqrt(sigma**2 + tau**2), k)
     result: SelectiveInferenceResult = ms.inference(
-        rng.integers(k), inference_mode="exhaustive"
+        rng.integers(k),
+        inference_mode="exhaustive",
     )
 
     # prepare for randomized inference
-    sigma_ = sigma * np.linalg.norm(ms.eta, ord=2)
-    tau_ = tau * np.linalg.norm(ms.eta, ord=2)
+    sigma_ = float(sigma * np.linalg.norm(ms.eta, ord=2))
+    tau_ = float(tau * np.linalg.norm(ms.eta, ord=2))
     truncated_region = RealSubset(
         np.array(result.truncated_intervals) * np.sqrt(sigma_**2 + tau_**2)
     )

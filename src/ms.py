@@ -1,7 +1,7 @@
 """Module for selective inference for marginal screening."""
 
 import numpy as np
-from sicore import (
+from sicore import (  # type: ignore[import]
     RealSubset,
     SelectiveInferenceNorm,
     SelectiveInferenceResult,
