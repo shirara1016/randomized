@@ -5,7 +5,7 @@ import warnings
 
 import numpy as np
 import polars as pl
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed  # type: ignore[import]
 
 from src.inference import naive_inference, polyhedral_inference, randomized_inference
 
@@ -16,7 +16,7 @@ def simulate(method: str, delta: float, base_rng: np.random.Generator) -> None:
     n, d = 100, 10
     k = 3
     sigma = 1.0
-    tau = 1.0
+    tau = 2.0
 
     match method:
         case "randomized":
@@ -53,7 +53,7 @@ def simulate(method: str, delta: float, base_rng: np.random.Generator) -> None:
             "mle": mle_list,
         }
     )
-    frame.write_csv(f"results/simulation_{method}_{delta}.csv")
+    frame.write_csv(f"results/simulation_{method}_high_{delta}.csv")
 
 
 if __name__ == "__main__":
