@@ -9,12 +9,46 @@ from sicore import (  # type: ignore[import]
     SelectiveInferenceResult,
     truncated_cdf,
 )
+from sicore.main.inference import RandomizedSelectiveInferenceNorm
 
 from src.ms import MarginalScreeningNorm
 from src.utils import compute_log_area
 
 
 def randomized_inference(
+    rng: np.random.Generator,
+    n: int = 100,
+    d: int = 10,
+    delta: float = 0.0,
+    sigma: float = 1.0,
+    k: int = 3,
+    tau: float = 1.0,
+):
+    beta = delta * np.ones(d)
+    X = rng.normal(size=(n, d))
+    y = X @ beta + rng.normal(size=n, scale=sigma)
+    omega = rng.normal(size=n, scale=tau)
+
+    ms = MarginalScreeningNorm(X, y + omega, np.sqrt(sigma**2 + tau**2), k)
+    eta = ms.construct_eta(rng.integers(k))
+    si = RandomizedSelectiveInferenceNorm(
+        y,
+        sigma**2,
+        omega,
+        tau**2,
+        eta,
+    )
+    result = si.randomized_inference(ms.algorithm, ms.model_selector)
+    p_randomized = result.p_value
+    ci_lower, ci_upper = result.confidence_interval
+    mle = result.point_estimate
+    true_signal = ms.eta @ (X @ beta)
+    is_contain = (ci_lower <= true_signal) and (true_signal <= ci_upper)
+
+    return true_signal, p_randomized, [ci_lower, ci_upper], is_contain, mle
+
+
+def _randomized_inference_(
     rng: np.random.Generator,
     n: int = 100,
     d: int = 10,
