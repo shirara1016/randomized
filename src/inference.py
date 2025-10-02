@@ -2,9 +2,9 @@
 
 import numpy as np
 from sicore import (  # type: ignore[import]
+    RandomizedSelectiveInference,
     SelectiveInferenceNorm,
 )
-from sicore.main.inference import RandomizedSelectiveInferenceNorm
 
 from src.ms import MarginalScreening
 
@@ -77,7 +77,7 @@ def randomized_inference(
 
     ms = MarginalScreening(X, y + omega, k)
     eta = ms.construct_eta(rng.integers(k))
-    si = RandomizedSelectiveInferenceNorm(
+    si = RandomizedSelectiveInference(
         y,
         cov,
         omega,
