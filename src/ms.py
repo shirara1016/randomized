@@ -3,17 +3,15 @@
 import numpy as np
 from sicore import (  # type: ignore[import]
     RealSubset,
-    SelectiveInferenceNorm,
-    SelectiveInferenceResult,
     linear_polynomials_below_zero,
 )
 
 
-class MarginalScreeningNorm:
+class MarginalScreening:
     """A class for marginal screening."""
 
-    def __init__(self, X: np.ndarray, y: np.ndarray, sigma: float, k: int) -> None:
-        self.X, self.y, self.sigma, self.k = X, y, sigma, k
+    def __init__(self, X: np.ndarray, y: np.ndarray, k: int) -> None:
+        self.X, self.y, self.k = X, y, k
         self.M = self._feature_selection(X, y, k)
 
     def _feature_selection(self, X: np.ndarray, y: np.ndarray, k: int) -> list[int]:
@@ -51,19 +49,6 @@ class MarginalScreeningNorm:
 
     def model_selector(self, M: list[int]) -> bool:
         return set(self.M) == set(M)
-
-    def inference(
-        self,
-        index: int,
-        **kwargs,
-    ) -> SelectiveInferenceResult:
-        self.eta = self.construct_eta(index)
-        self.si = SelectiveInferenceNorm(self.y, self.sigma**2, self.eta)
-        return self.si.inference(
-            self.algorithm,
-            self.model_selector,
-            **kwargs,
-        )
 
     def construct_eta(self, index: int) -> np.ndarray:
         return (

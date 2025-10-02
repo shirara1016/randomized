@@ -1,18 +1,67 @@
 """Module for selective inference."""
 
 import numpy as np
-from scipy.integrate import quad  # type: ignore[import]
-from scipy.optimize import brentq, minimize  # type: ignore[import]
-from scipy.stats import norm  # type: ignore[import]
 from sicore import (  # type: ignore[import]
-    RealSubset,
-    SelectiveInferenceResult,
-    truncated_cdf,
+    SelectiveInferenceNorm,
 )
 from sicore.main.inference import RandomizedSelectiveInferenceNorm
 
-from src.ms import MarginalScreeningNorm
-from src.utils import compute_log_area
+from src.ms import MarginalScreening
+
+
+def sample_full_covariance(dim: int, rng: np.random.Generator) -> np.ndarray:
+    L = np.zeros((dim, dim))
+    L[0, 0] = 1.0
+    for k in range(1, dim):
+        alpha = 2.0 - 1.0 + (dim - k) / 2.0
+        y = rng.beta(k / 2.0, alpha)
+        u = rng.normal(size=k)
+        u /= np.linalg.norm(u)
+        w = np.sqrt(y) * u
+        L[k, :k] = w
+        L[k, k] = np.sqrt(1.0 - y)
+    stds = rng.uniform(0.8, 1.2, size=dim)
+    return np.diag(stds) @ L @ L.T @ np.diag(stds)
+
+
+def sample_diagonal_covariance(dim: int, rng: np.random.Generator) -> np.ndarray:
+    stds = rng.uniform(0.8, 1.2, size=dim)
+    return stds**2
+
+
+def sample_identity_covariance(dim: int, rng: np.random.Generator) -> float:
+    _ = dim
+    return float(rng.uniform(0.8, 1.2)) ** 2.0
+
+
+def make_data(
+    rng: np.random.Generator,
+    n: int,
+    d: int,
+    delta: float,
+    tau: float,
+    cov_type: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float | np.ndarray]:
+    cov: float | np.ndarray
+    match cov_type:
+        case "base":
+            cov = 1.0
+            noise = rng.normal(size=n, scale=1.0)
+        case "full":
+            cov = sample_full_covariance(n, rng)
+            noise = rng.multivariate_normal(mean=np.zeros(n), cov=cov)
+        case "diag":
+            cov = sample_diagonal_covariance(n, rng)
+            noise = rng.normal(size=n, scale=1.0) * np.sqrt(cov)
+        case "identity":
+            cov = sample_identity_covariance(n, rng)
+            noise = rng.normal(size=n, scale=np.sqrt(cov))
+
+    beta = delta * np.ones(d)
+    X = rng.normal(size=(n, d))
+    y = X @ beta + noise
+    omega = rng.normal(size=n, scale=tau)
+    return X, y, omega, cov
 
 
 def randomized_inference(
@@ -20,153 +69,30 @@ def randomized_inference(
     n: int = 100,
     d: int = 10,
     delta: float = 0.0,
-    sigma: float = 1.0,
     k: int = 3,
+    cov_type: str = "base",
     tau: float = 1.0,
 ):
-    beta = delta * np.ones(d)
-    X = rng.normal(size=(n, d))
-    y = X @ beta + rng.normal(size=n, scale=sigma)
-    omega = rng.normal(size=n, scale=tau)
+    X, y, omega, cov = make_data(rng, n, d, delta, tau, cov_type)
 
-    ms = MarginalScreeningNorm(X, y + omega, np.sqrt(sigma**2 + tau**2), k)
+    ms = MarginalScreening(X, y + omega, k)
     eta = ms.construct_eta(rng.integers(k))
     si = RandomizedSelectiveInferenceNorm(
         y,
-        sigma**2,
+        cov,
         omega,
         tau**2,
         eta,
     )
-    result = si.randomized_inference(ms.algorithm, ms.model_selector)
+    result = si.inference(ms.algorithm, ms.model_selector, confidence_level=0.9)
     p_randomized = result.p_value
     ci_lower, ci_upper = result.confidence_interval
     mle = result.point_estimate
-    true_signal = ms.eta @ (X @ beta)
+
+    true_signal = delta * eta @ (X @ np.ones(d))
     is_contain = (ci_lower <= true_signal) and (true_signal <= ci_upper)
 
     return true_signal, p_randomized, [ci_lower, ci_upper], is_contain, mle
-
-
-def _randomized_inference_(
-    rng: np.random.Generator,
-    n: int = 100,
-    d: int = 10,
-    delta: float = 0.0,
-    sigma: float = 1.0,
-    k: int = 3,
-    tau: float = 1.0,
-):
-    beta = delta * np.ones(d)
-    X = rng.normal(size=(n, d))
-    y = X @ beta + rng.normal(size=n, scale=sigma)
-    omega = rng.normal(size=n, scale=tau)
-
-    ms = MarginalScreeningNorm(X, y + omega, np.sqrt(sigma**2 + tau**2), k)
-    result: SelectiveInferenceResult = ms.inference(
-        rng.integers(k),
-        inference_mode="exhaustive",
-    )
-
-    # prepare for randomized inference
-    sigma_ = float(sigma * np.linalg.norm(ms.eta, ord=2))
-    tau_ = float(tau * np.linalg.norm(ms.eta, ord=2))
-    truncated_region = RealSubset(
-        np.array(result.truncated_intervals) * np.sqrt(sigma_**2 + tau_**2)
-    )
-    stat = ms.eta @ y
-
-    # compute p-value with randomization
-    pivot = compute_randomized_cdf(stat, sigma_, tau_, truncated_region, 0.0)
-    p_randomized = 2.0 * min(pivot, 1.0 - pivot)
-
-    # compute CI with randomization
-    true_signal = ms.eta @ (X @ beta)
-    ci_lower = brentq(
-        lambda mu: compute_randomized_cdf(stat, sigma_, tau_, truncated_region, mu)
-        - 0.95,
-        -20.0,
-        20.0,
-    )
-    ci_upper = brentq(
-        lambda mu: compute_randomized_cdf(stat, sigma_, tau_, truncated_region, mu)
-        - 0.05,
-        -20.0,
-        20.0,
-    )
-    is_contain = (ci_lower <= true_signal) and (true_signal <= ci_upper)
-
-    # compute MLE with randomization
-    mle = minimize(
-        lambda mu: -compute_randomized_pdf(
-            stat,
-            sigma_,
-            tau_,
-            truncated_region,
-            mu,
-        ),
-        x0=0.0,
-    ).x[0]
-
-    return true_signal, p_randomized, [ci_lower, ci_upper], is_contain, mle
-
-
-def compute_randomized_cdf(
-    stat: float,
-    sigma: float,
-    tau: float,
-    truncated_region: RealSubset,
-    mu: float,
-):
-    rho_sq = tau**2 / (sigma**2 + tau**2)
-    log_denominator = compute_log_area(
-        norm(loc=mu, scale=np.sqrt(sigma**2 + tau**2)), truncated_region
-    )
-
-    def integrand(v):
-        log_numerator = norm.logcdf(
-            stat, loc=rho_sq * mu + (1 - rho_sq) * v, scale=sigma * np.sqrt(rho_sq)
-        )
-        return np.exp(
-            norm.logpdf(v, loc=mu, scale=np.sqrt(sigma**2 + tau**2))
-            + log_numerator
-            - log_denominator
-        )
-
-    value = 0.0
-    for interval in truncated_region:
-        a, b = interval
-        value += quad(integrand, a, b)[0]
-    return value
-
-
-def compute_randomized_pdf(
-    stat: float,
-    sigma: float,
-    tau: float,
-    truncated_region: RealSubset,
-    mu: float,
-):
-    rho_sq = tau**2 / (sigma**2 + tau**2)
-    log_denominator = compute_log_area(
-        norm(loc=mu, scale=np.sqrt(sigma**2 + tau**2)), truncated_region
-    )
-
-    def integrand(v):
-        log_numerator = norm.logpdf(
-            stat, loc=rho_sq * mu + (1 - rho_sq) * v, scale=sigma * np.sqrt(rho_sq)
-        )
-        return np.exp(
-            norm.logpdf(v, loc=mu, scale=np.sqrt(sigma**2 + tau**2))
-            + log_numerator
-            - log_denominator
-        )
-
-    value = 0.0
-    for interval in truncated_region:
-        a, b = interval
-        value += quad(integrand, a, b)[0]
-    return value
 
 
 def polyhedral_inference(
@@ -174,70 +100,24 @@ def polyhedral_inference(
     n: int = 100,
     d: int = 10,
     delta: float = 0.0,
-    sigma: float = 1.0,
     k: int = 3,
+    cov_type: str = "base",
 ):
-    beta = delta * np.ones(d)
-    X = rng.normal(size=(n, d))
-    y = X @ beta + rng.normal(size=n, scale=sigma)
+    X, y, _, cov = make_data(rng, n, d, delta, 1.0, cov_type)
 
-    ms = MarginalScreeningNorm(X, y, sigma, k)
-    result: SelectiveInferenceResult = ms.inference(
-        rng.integers(k), inference_mode="exhaustive"
-    )
+    ms = MarginalScreening(X, y, k)
+    eta = ms.construct_eta(rng.integers(k))
+    si = SelectiveInferenceNorm(y, cov, eta)
+    result = si.inference(ms.algorithm, ms.model_selector, inference_mode="exhaustive")
 
     p_value = result.p_value
 
-    stat_sigma = sigma * np.linalg.norm(ms.eta, ord=2)
-    truncated_region = RealSubset(np.array(result.truncated_intervals) * stat_sigma)
-    stat = result.stat * stat_sigma
+    ci_lower, ci_upper = si.interval_estimate(result, confidence_level=0.9)
 
-    a, b = -10.0, 10.0
-    while True:
-        val_a = (
-            truncated_cdf(norm(loc=a, scale=stat_sigma), stat, truncated_region) - 0.95
-        )
-        val_b = (
-            truncated_cdf(norm(loc=b, scale=stat_sigma), stat, truncated_region) - 0.95
-        )
-        if val_a * val_b < 0:
-            break
-        a *= 2
-        b *= 2
-    ci_lower = brentq(
-        lambda mu: truncated_cdf(norm(loc=mu, scale=stat_sigma), stat, truncated_region)
-        - 0.95,
-        a,
-        b,
-    )
-
-    a, b = -10.0, 10.0
-    while True:
-        val_a = (
-            truncated_cdf(norm(loc=a, scale=stat_sigma), stat, truncated_region) - 0.05
-        )
-        val_b = (
-            truncated_cdf(norm(loc=b, scale=stat_sigma), stat, truncated_region) - 0.05
-        )
-        if val_a * val_b < 0:
-            break
-        a *= 2
-        b *= 2
-    ci_upper = brentq(
-        lambda mu: truncated_cdf(norm(loc=mu, scale=stat_sigma), stat, truncated_region)
-        - 0.05,
-        a,
-        b,
-    )
-
-    true_signal = ms.eta @ (X @ beta)
+    true_signal = delta * eta @ (X @ np.ones(d))
     is_contain = (ci_lower <= true_signal) and (true_signal <= ci_upper)
 
-    mle = minimize(
-        lambda mu: -norm.logpdf(stat, loc=mu, scale=stat_sigma)
-        + compute_log_area(norm(loc=mu, scale=stat_sigma), truncated_region),
-        x0=0.0,
-    ).x[0]
+    mle = si.point_estimate(result)
     return true_signal, p_value, [ci_lower, ci_upper], is_contain, mle
 
 
@@ -246,26 +126,29 @@ def naive_inference(
     n: int = 100,
     d: int = 10,
     delta: float = 0.0,
-    sigma: float = 1.0,
     k: int = 3,
+    cov_type: str = "base",
 ):
-    beta = delta * np.ones(d)
-    X = rng.normal(size=(n, d))
-    y = X @ beta + rng.normal(size=n, scale=sigma)
+    X, y, _, cov = make_data(rng, n, d, delta, 1.0, cov_type)
 
-    ms = MarginalScreeningNorm(X, y, sigma, k)
-    result: SelectiveInferenceResult = ms.inference(
-        rng.integers(k), inference_mode="over_conditioning"
+    ms = MarginalScreening(X, y, k)
+    eta = ms.construct_eta(rng.integers(k))
+    si = SelectiveInferenceNorm(y, cov, eta)
+    result = si.inference(
+        ms.algorithm,
+        ms.model_selector,
+        inference_mode="over_conditioning",
     )
 
     p_value = result.naive_p_value()
-    stat = result.stat * sigma * np.linalg.norm(ms.eta, ord=2)
+    ci_lower, ci_upper = (
+        result.stat - result.null_rv.ppf(0.95),
+        result.stat + result.null_rv.ppf(0.95),
+    )
 
-    true_signal = ms.eta @ (X @ beta)
-    ci_lower = stat - norm.ppf(0.975) * sigma * np.linalg.norm(ms.eta, ord=2)
-    ci_upper = stat + norm.ppf(0.975) * sigma * np.linalg.norm(ms.eta, ord=2)
+    mle = result.stat
+
+    true_signal = delta * eta @ (X @ np.ones(d))
     is_contain = (ci_lower <= true_signal) and (true_signal <= ci_upper)
-
-    mle = stat
 
     return true_signal, p_value, [ci_lower, ci_upper], is_contain, mle

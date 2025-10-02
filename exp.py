@@ -1,7 +1,6 @@
 """Module for experiments."""
 
 import argparse
-import warnings
 
 import numpy as np
 import polars as pl
@@ -9,33 +8,53 @@ from joblib import Parallel, delayed  # type: ignore[import]
 
 from src.inference import naive_inference, polyhedral_inference, randomized_inference
 
-warnings.filterwarnings("ignore")
 
-
-def simulate(method: str, delta: float, base_rng: np.random.Generator) -> None:
+def simulate(
+    method: str,
+    delta: float,
+    cov_type: str,
+    base_rng: np.random.Generator,
+) -> None:
     n, d = 100, 10
     k = 3
-    sigma = 1.0
-    tau = 2.0
+    tau = 1.0
 
     match method:
         case "randomized":
             results = Parallel(n_jobs=32)(
                 delayed(randomized_inference)(
-                    rng, n=n, d=d, delta=delta, sigma=sigma, k=k, tau=tau
+                    rng,
+                    n=n,
+                    d=d,
+                    delta=delta,
+                    k=k,
+                    tau=tau,
+                    cov_type=cov_type,
                 )
                 for rng in base_rng.spawn(10000)
             )
         case "polyhedral":
             results = Parallel(n_jobs=32)(
                 delayed(polyhedral_inference)(
-                    rng, n=n, d=d, delta=delta, sigma=sigma, k=k
+                    rng,
+                    n=n,
+                    d=d,
+                    delta=delta,
+                    k=k,
+                    cov_type=cov_type,
                 )
                 for rng in base_rng.spawn(10000)
             )
         case "naive":
             results = Parallel(n_jobs=32)(
-                delayed(naive_inference)(rng, n=n, d=d, delta=delta, sigma=sigma, k=k)
+                delayed(naive_inference)(
+                    rng,
+                    n=n,
+                    d=d,
+                    delta=delta,
+                    k=k,
+                    cov_type=cov_type,
+                )
                 for rng in base_rng.spawn(10000)
             )
     true_signal_list, p_list, ci_list, is_contain_list, mle_list = zip(*results)
@@ -53,7 +72,7 @@ def simulate(method: str, delta: float, base_rng: np.random.Generator) -> None:
             "mle": mle_list,
         }
     )
-    frame.write_csv(f"results/simulation_{method}_high_{delta}.csv")
+    frame.write_csv(f"results/simulation_{cov_type}_{method}_{delta}.csv")
 
 
 if __name__ == "__main__":
@@ -68,11 +87,16 @@ if __name__ == "__main__":
         type=float,
         default=0.0,
     )
+    parser.add_argument(
+        "--cov",
+        type=str,
+        default="base",
+    )
     args = parser.parse_args()
 
     sub_seed = (1 if args.method == "randomized" else 0) + (
         2 if args.method == "naive" else 0
     )
     seed = int(args.delta * 1000) + sub_seed
-    base_rng = np.random.default_rng(seed)
-    simulate(args.method, args.delta, base_rng)
+    base_rng = np.random.default_rng(seed + 3)
+    simulate(args.method, args.delta, args.cov, base_rng)
