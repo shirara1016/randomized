@@ -8,6 +8,8 @@ from joblib import Parallel, delayed  # type: ignore[import]
 
 from src.inference import naive_inference, polyhedral_inference, randomized_inference
 
+N_JOBS = 96
+
 
 def simulate(
     method: str,
@@ -21,7 +23,7 @@ def simulate(
 
     match method:
         case "randomized":
-            results = Parallel(n_jobs=32)(
+            results = Parallel(n_jobs=N_JOBS)(
                 delayed(randomized_inference)(
                     rng,
                     n=n,
@@ -34,7 +36,7 @@ def simulate(
                 for rng in base_rng.spawn(10000)
             )
         case "polyhedral":
-            results = Parallel(n_jobs=32)(
+            results = Parallel(n_jobs=N_JOBS)(
                 delayed(polyhedral_inference)(
                     rng,
                     n=n,
@@ -46,7 +48,7 @@ def simulate(
                 for rng in base_rng.spawn(10000)
             )
         case "naive":
-            results = Parallel(n_jobs=32)(
+            results = Parallel(n_jobs=N_JOBS)(
                 delayed(naive_inference)(
                     rng,
                     n=n,
