@@ -13,7 +13,7 @@ def sample_full_covariance(dim: int, rng: np.random.Generator) -> np.ndarray:
     L = np.zeros((dim, dim))
     L[0, 0] = 1.0
     for k in range(1, dim):
-        alpha = 2.0 - 1.0 + (dim - k) / 2.0
+        alpha = 1.5 - 1.0 + (dim - k) / 2.0
         y = rng.beta(k / 2.0, alpha)
         u = rng.normal(size=k)
         u /= np.linalg.norm(u)
@@ -25,13 +25,13 @@ def sample_full_covariance(dim: int, rng: np.random.Generator) -> np.ndarray:
 
 
 def sample_diagonal_covariance(dim: int, rng: np.random.Generator) -> np.ndarray:
-    stds = rng.uniform(0.8, 1.2, size=dim)
+    stds = rng.uniform(0.6, 1.4, size=dim)
     return stds**2
 
 
 def sample_identity_covariance(dim: int, rng: np.random.Generator) -> float:
     _ = dim
-    return float(rng.uniform(0.8, 1.2)) ** 2.0
+    return float(rng.uniform(0.6, 1.4)) ** 2.0
 
 
 def make_data(
