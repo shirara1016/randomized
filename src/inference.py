@@ -113,11 +113,11 @@ def polyhedral_inference(
     p_value = result.p_value
 
     ci_lower, ci_upper = si.interval_estimate(result, confidence_level=0.9)
+    mle = si.point_estimate(result)
 
     true_signal = delta * eta @ (X @ np.ones(d))
     is_contain = (ci_lower <= true_signal) and (true_signal <= ci_upper)
 
-    mle = si.point_estimate(result)
     return true_signal, p_value, [ci_lower, ci_upper], is_contain, mle
 
 
