@@ -1,6 +1,7 @@
 """Module for selective inference."""
 
 import numpy as np
+from scipy.stats import norm  # type: ignore[import]
 from sicore import (  # type: ignore[import]
     RandomizedSelectiveInference,
     SelectiveInferenceNorm,
@@ -57,11 +58,123 @@ def make_data(
             cov = sample_identity_covariance(n, rng)
             noise = rng.normal(size=n, scale=np.sqrt(cov))
 
-    beta = delta * np.ones(d)
+    # beta = delta * np.ones(d)
+    beta = np.zeros(d)
+    beta[:3] = delta
     X = rng.normal(size=(n, d))
     y = X @ beta + noise
     omega = rng.normal(size=n, scale=tau)
     return X, y, omega, cov
+
+
+def screening(
+    rng: np.random.Generator,
+    n: int = 100,
+    d: int = 10,
+    delta: float = 0.0,
+    k: int = 3,
+    split_rate: float = 0.5,
+    mode: str = "randomized",
+) -> bool:
+    if mode == "randomized":
+        tau = ((1.0 - split_rate) / split_rate) ** 0.5
+        X, y, omega, _ = make_data(rng, n, d, delta, tau, "base")
+        ms = MarginalScreening(X, y + omega, k)
+        if set(ms.M) == {0, 1, 2}:
+            return True
+        else:
+            return False
+    else:
+        num_for_selection = int(n * split_rate)
+        X, y, _, _ = make_data(rng, n, d, delta, 1.0, "base")
+        ms = MarginalScreening(X[:num_for_selection, :], y[:num_for_selection], k)
+        if set(ms.M) == {0, 1, 2}:
+            return True
+        else:
+            return False
+
+
+def selective_inference(
+    rng: np.random.Generator,
+    n: int = 100,
+    d: int = 10,
+    delta: float = 0.0,
+    k: int = 3,
+    split_rate: float = 0.5,
+    is_oc: bool = False,
+):
+    if split_rate == 1.0:
+        return polyhedral_inference(
+            rng,
+            n,
+            d,
+            delta,
+            k,
+            "base",
+            inference_mode="over_conditioning" if is_oc else "exhaustive",
+        )
+    else:
+        tau = ((1.0 - split_rate) / split_rate) ** 0.5
+        return randomized_inference(
+            rng,
+            n,
+            d,
+            delta,
+            k,
+            "base",
+            tau,
+            inference_mode="over_conditioning" if is_oc else "parametric",
+        )
+
+
+def splitting_inference(
+    rng: np.random.Generator,
+    n: int = 100,
+    d: int = 10,
+    delta: float = 0.0,
+    k: int = 3,
+    cov_type: str = "base",
+    split_rate: float = 0.5,
+):
+    try:
+        num_for_selection = int(n * split_rate)
+        while True:
+            X, y, _, cov = make_data(rng, n, d, delta, 1.0, cov_type)
+            ms = MarginalScreening(X[:num_for_selection, :], y[:num_for_selection], k)
+            if set(ms.M) == {0, 1, 2}:
+                break
+        X_sub = X[num_for_selection:, :]
+        eta = (
+            X_sub[:, ms.M]
+            @ np.linalg.inv(X_sub[:, ms.M].T @ X_sub[:, ms.M])[:, rng.integers(k)]
+        )
+        stat = eta @ y[num_for_selection:] / np.sqrt(eta @ eta)
+
+        p_value = 2.0 * norm.sf(np.abs(stat))
+        ci_lower, ci_upper = (
+            stat - norm.ppf(0.95),
+            stat + norm.ppf(0.95),
+        )
+
+        mle = stat
+
+        beta = np.zeros(d)
+        beta[:3] = delta
+        true_signal = 100
+        # true_signal = eta @ (X[:num_for_selection, :] @ beta)
+        is_contain = (ci_lower <= true_signal) and (true_signal <= ci_upper)
+
+        return true_signal, p_value, [ci_lower, ci_upper], is_contain, mle
+    except Exception:
+        return splitting_inference(
+            rng,
+            n,
+            d,
+            delta,
+            k,
+            cov_type,
+            split_rate,
+        )
 
 
 def randomized_inference(
@@ -72,10 +185,13 @@ def randomized_inference(
     k: int = 3,
     cov_type: str = "base",
     tau: float = 1.0,
+    inference_mode: str = "parametric",
 ):
-    X, y, omega, cov = make_data(rng, n, d, delta, tau, cov_type)
-
-    ms = MarginalScreening(X, y + omega, k)
+    while True:
+        X, y, omega, cov = make_data(rng, n, d, delta, tau, cov_type)
+        ms = MarginalScreening(X, y + omega, k)
+        if set(ms.M) == {0, 1, 2}:
+            break
     eta = ms.construct_eta(rng.integers(k))
     si = RandomizedSelectiveInference(
         y,
@@ -84,12 +200,19 @@ def randomized_inference(
         tau**2,
         eta,
     )
-    result = si.inference(ms.algorithm, ms.model_selector, confidence_level=0.9)
+    result = si.inference(
+        ms.algorithm,
+        ms.model_selector,
+        confidence_level=0.9,
+        inference_mode=inference_mode,
+    )
     p_randomized = result.p_value
     ci_lower, ci_upper = result.confidence_interval
     mle = result.point_estimate
 
-    true_signal = delta * eta @ (X @ np.ones(d))
+    beta = np.zeros(d)
+    beta[:3] = delta
+    true_signal = eta @ (X @ beta)
     is_contain = (ci_lower <= true_signal) and (true_signal <= ci_upper)
 
     return true_signal, p_randomized, [ci_lower, ci_upper], is_contain, mle
@@ -102,20 +225,29 @@ def polyhedral_inference(
     delta: float = 0.0,
     k: int = 3,
     cov_type: str = "base",
+    inference_mode: str = "exhaustive",
 ):
-    X, y, _, cov = make_data(rng, n, d, delta, 1.0, cov_type)
-
-    ms = MarginalScreening(X, y, k)
+    while True:
+        X, y, _, cov = make_data(rng, n, d, delta, 1.0, cov_type)
+        ms = MarginalScreening(X, y, k)
+        if set(ms.M) == {0, 1, 2}:
+            break
     eta = ms.construct_eta(rng.integers(k))
     si = SelectiveInferenceNorm(y, cov, eta)
-    result = si.inference(ms.algorithm, ms.model_selector, inference_mode="exhaustive")
+    result = si.inference(
+        ms.algorithm,
+        ms.model_selector,
+        inference_mode=inference_mode,
+    )
 
     p_value = result.p_value
 
     ci_lower, ci_upper = si.interval_estimate(result, confidence_level=0.9)
     mle = si.point_estimate(result)
 
-    true_signal = delta * eta @ (X @ np.ones(d))
+    beta = np.zeros(d)
+    beta[:3] = delta
+    true_signal = eta @ (X @ beta)
     is_contain = (ci_lower <= true_signal) and (true_signal <= ci_upper)
 
     return true_signal, p_value, [ci_lower, ci_upper], is_contain, mle
@@ -129,9 +261,11 @@ def naive_inference(
     k: int = 3,
     cov_type: str = "base",
 ):
-    X, y, _, cov = make_data(rng, n, d, delta, 1.0, cov_type)
-
-    ms = MarginalScreening(X, y, k)
+    while True:
+        X, y, _, cov = make_data(rng, n, d, delta, 1.0, cov_type)
+        ms = MarginalScreening(X, y, k)
+        if set(ms.M) == {0, 1, 2}:
+            break
     eta = ms.construct_eta(rng.integers(k))
     si = SelectiveInferenceNorm(y, cov, eta)
     result = si.inference(
@@ -148,7 +282,9 @@ def naive_inference(
 
     mle = result.stat
 
-    true_signal = delta * eta @ (X @ np.ones(d))
+    beta = np.zeros(d)
+    beta[:3] = delta
+    true_signal = eta @ (X @ beta)
     is_contain = (ci_lower <= true_signal) and (true_signal <= ci_upper)
 
     return true_signal, p_value, [ci_lower, ci_upper], is_contain, mle
